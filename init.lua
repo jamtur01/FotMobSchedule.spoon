@@ -1,9 +1,3 @@
---- === FotMobSchedule ===
----
---- Fetch schedule for specified teams from FotMob and display as notifications
----
---- Download: [https://github.com/YOUR_GITHUB_USERNAME/FotMobSchedule.spoon](https://github.com/YOUR_GITHUB_USERNAME/FotMobSchedule.spoon)
-
 local obj = {}
 obj.__index = obj
 
@@ -15,15 +9,17 @@ obj.homepage = "https://github.com/jamtur01/FotMobSchedule.spoon"
 obj.license = "MIT - https://opensource.org/licenses/MIT"
 
 obj.logger = hs.logger.new('FotMobSchedule', 'debug')
-obj.teams = {
-    { name = "Arsenal Women", id = 258657 }
-}
 obj.interval = 3600
 obj.baseUrl = "https://www.fotmob.com"
 obj.apiBaseUrl = "https://www.fotmob.com/api/"
 obj.menuBar = nil
 obj.lastSchedule = nil
-obj.showNextGames = 1  -- Default to showing only the next game
+
+-- Load saved settings or use defaults
+obj.teams = hs.settings.get("FotMobSchedule_teams") or {
+    { name = "Arsenal Women", id = 258657 }
+}
+obj.showNextGames = hs.settings.get("FotMobSchedule_showNextGames") or 1  -- Default to showing only the next game
 
 local function fetchData(url)
     obj.logger.d("Fetching data from URL: " .. url)
@@ -38,7 +34,6 @@ end
 
 local function formatDate(utcTime)
     if type(utcTime) == "string" then
-        -- Assuming the string is in ISO 8601 format
         local year, month, day, hour, min = utcTime:match("(%d+)-(%d+)-(%d+)T(%d+):(%d+)")
         if year then
             local timestamp = os.time({year=year, month=month, day=day, hour=hour, min=min})
@@ -58,7 +53,7 @@ local function processSchedule(teamData)
         obj.logger.d("Found " .. #fixtures .. " fixtures")
         for _, fixture in ipairs(fixtures) do
             local opponent = fixture.opponent.name
-            local matchDisplay = string.format("Arsenal Women vs %s", opponent)
+            local matchDisplay = string.format("%s vs %s", teamData.details.name, opponent)
             table.insert(schedule, {
                 date = formatDate(fixture.status.utcTime),
                 match = matchDisplay,
@@ -133,16 +128,56 @@ function obj:setNumGames()
     :show()
 end
 
+function obj:setTeams()
+    hs.chooser.new(function(choice)
+        if choice then
+            local teams = {}
+            for team in string.gmatch(choice.text, '([^,]+)') do
+                local trimmedTeam = team:match("^%s*(.-)%s*$")  -- Trim whitespace
+                local teamId = self:getTeamIdByName(trimmedTeam)
+                if teamId then
+                    table.insert(teams, { name = trimmedTeam, id = teamId })
+                end
+            end
+            if #teams > 0 then
+                self.teams = teams
+                hs.settings.set("FotMobSchedule_teams", teams)  -- Save the selected teams
+                hs.notify.new({title="FotMob Schedule", informativeText="Teams set to: " .. table.concat(choice.text, ", ")}):send()
+            else
+                hs.notify.new({title="FotMob Schedule", informativeText="No valid teams found. Please try again."}):send()
+            end
+        end
+    end)
+    :choices({
+        {text = "Arsenal Women"}, {text = "Chelsea Women"}, {text = "Manchester City Women"}, {text = "Manchester United Women"}
+        -- Add more teams here as needed
+    })
+    :placeholderText("Enter teams (comma separated)")
+    :show()
+end
+
+function obj:getTeamIdByName(teamName)
+    -- Here you would map the team name to the FotMob ID
+    local teamIds = {
+        ["Arsenal Women"] = 258657,
+        ["Chelsea Women"] = 104952,
+        ["Manchester City Women"] = 205850,
+        ["Manchester United Women"] = 1122357
+        -- Add more mappings here
+    }
+    return teamIds[teamName]
+end
+
 function obj:start()
     obj.logger.i("Starting FotMobSchedule")
     
     if not self.menuBar then
         self.menuBar = hs.menubar.new()
-        self.menuBar:setTitle("FB")
+        self.menuBar:setTitle("F")
         self.menuBar:setMenu({
             {title = "Show Schedule", fn = function() showSchedule() end},
-            {title = "-"},
-            {title = "Set Number of Games", fn = function() self:setNumGames() end}
+            {title = "Set Teams", fn = function() self:setTeams() end},
+            {title = "Set Number of Games", fn = function() self:setNumGames() end},
         })
     end
     
@@ -167,15 +202,10 @@ function obj:stop()
     return self
 end
 
---- FotMobSchedule:setNextGamesCount(count)
---- Method
---- Set the number of upcoming games to display
----
---- Parameters:
----  * count - A number indicating how many upcoming games to show
 function obj:setNextGamesCount(count)
     if type(count) == "number" and count > 0 then
         self.showNextGames = count
+        hs.settings.set("FotMobSchedule_showNextGames", count)  -- Save the number of games to show
         obj.logger.i("Set to show next " .. count .. " games")
     else
         obj.logger.w("Invalid game count. Please provide a positive number.")
