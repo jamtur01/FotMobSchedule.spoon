@@ -157,13 +157,11 @@ function obj:setTeams()
 end
 
 function obj:getTeamIdByName(teamName)
-    -- Here you would map the team name to the FotMob ID
     local teamIds = {
         ["Arsenal Women"] = 258657,
         ["Chelsea Women"] = 104952,
         ["Manchester City Women"] = 205850,
         ["Manchester United Women"] = 1122357
-        -- Add more mappings here
     }
     return teamIds[teamName]
 end
