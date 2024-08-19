@@ -8,7 +8,7 @@ obj.author = "James Turnbull <james@lovedthanlost.net>"
 obj.homepage = "https://github.com/jamtur01/FotMobSchedule.spoon"
 obj.license = "MIT - https://opensource.org/licenses/MIT"
 
-obj.logger = hs.logger.new('FotMobSchedule', 'debug')
+obj.logger = hs.logger.new('FotMobSchedule', 'info')
 obj.interval = 3600
 obj.baseUrl = "https://www.fotmob.com"
 obj.apiBaseUrl = "https://www.fotmob.com/api/"
