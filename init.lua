@@ -28,7 +28,6 @@ local function fetchData(url)
         obj.logger.ef("Failed to fetch data from %s. Status: %d", url, status)
         return nil
     end
-    obj.logger.d("Successfully fetched data. Response length: " .. #body)
     return hs.json.decode(body)
 end
 
@@ -50,7 +49,6 @@ local function processSchedule(teamData)
     local schedule = {}
     if teamData and teamData.fixtures and teamData.fixtures.allFixtures and teamData.fixtures.allFixtures.fixtures then
         local fixtures = teamData.fixtures.allFixtures.fixtures
-        obj.logger.d("Found " .. #fixtures .. " fixtures")
         for _, fixture in ipairs(fixtures) do
             local opponent = fixture.opponent.name
             local matchDisplay = string.format("%s vs %s", teamData.details.name, opponent)
@@ -69,7 +67,7 @@ local function processSchedule(teamData)
 end
 
 function obj:fetchSchedule()
-    obj.logger.i("Starting to fetch schedules")
+    obj.logger.d("Starting to fetch schedules")
     local allSchedules = {}
     for _, team in ipairs(self.teams) do
         obj.logger.d("Fetching schedule for team: " .. team.name)
@@ -77,12 +75,11 @@ function obj:fetchSchedule()
         local data = fetchData(url)
         if data then
             allSchedules[team.name] = processSchedule(data)
-            obj.logger.i("Fetched schedule for " .. team.name .. ". Found " .. #allSchedules[team.name] .. " matches")
         else
             obj.logger.e("Failed to fetch data for team: " .. team.name)
         end
     end
-    obj.logger.i("Finished fetching schedules")
+    obj.logger.d("Finished fetching schedules")
     self.lastSchedule = allSchedules
     return allSchedules
 end
@@ -204,9 +201,9 @@ function obj:setNextGamesCount(count)
     if type(count) == "number" and count > 0 then
         self.showNextGames = count
         hs.settings.set("FotMobSchedule_showNextGames", count)  -- Save the number of games to show
-        obj.logger.i("Set to show next " .. count .. " games")
+        obj.logger.d("Set to show next " .. count .. " games")
     else
-        obj.logger.w("Invalid game count. Please provide a positive number.")
+        obj.logger.e("Invalid game count. Please provide a positive number.")
     end
 end
 
