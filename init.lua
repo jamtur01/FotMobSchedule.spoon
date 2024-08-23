@@ -36,10 +36,10 @@ local function formatDate(utcTime)
         local year, month, day, hour, min = utcTime:match("(%d+)-(%d+)-(%d+)T(%d+):(%d+)")
         if year then
             local timestamp = os.time({year=year, month=month, day=day, hour=hour, min=min})
-            return os.date("%a %b %d", timestamp)
+            return os.date("%a %b %d, %I:%M %p", timestamp)
         end
     elseif type(utcTime) == "number" then
-        return os.date("%a %b %d", utcTime / 1000)
+        return os.date("%a %b %d, %I:%M %p", utcTime / 1000)
     end
     return "Date unknown"
 end
@@ -84,31 +84,69 @@ function obj:fetchSchedule()
     return allSchedules
 end
 
-local function showNotifications(schedules)
+function obj:updateMenu()
+    local schedules = self.lastSchedule or self:fetchSchedule()
+
+    if not schedules then
+        hs.notify.new({title="FotMob Schedule Error", informativeText="Failed to fetch FotMob schedule"}):send()
+        return
+    end
+
+    local menuItems = {}
+
     for team, schedule in pairs(schedules) do
         for i, match in ipairs(schedule) do
             if i > obj.showNextGames then
                 break  -- Stop after showing the configured number of games
             end
-            hs.timer.doAfter(i * 2, function()  -- Delay each notification by 2 seconds
-                local notification = hs.notify.new(function()
-                    hs.urlevent.openURL(match.url)
-                end)
-                :title(team)
-                :subTitle(match.date)
-                :informativeText(match.match .. " (" .. (match.home and "Home" or "Away") .. ")")
-                :actionButtonTitle("Open")
-                :hasActionButton(true)
-                :withdrawAfter(0)  -- Don't automatically withdraw
-                
-                notification:send()
-            end)
+
+            -- Combine team names and formatted date and time in the title
+            local matchDisplay = string.format("%s - %s", match.match, match.date)
+            table.insert(menuItems, {
+                title = matchDisplay,
+                fn = function() hs.urlevent.openURL(match.url) end,
+                tooltip = match.date  -- Tooltip shows the date again (optional)
+            })
         end
     end
+
+    -- Default item if no upcoming matches
+    if #menuItems == 0 then
+        table.insert(menuItems, {title = "No upcoming games found"})
+    end
+
+    -- Update the menu
+    self.menuBar:setMenu(menuItems)
 end
 
-local function showSchedule()
-    showNotifications(obj.lastSchedule or obj:fetchSchedule())
+function obj:start()
+    obj.logger.i("Starting FotMobSchedule")
+    
+    if not self.menuBar then
+        self.menuBar = hs.menubar.new()
+        self.menuBar:setTitle("F")
+    end
+    
+    -- Fetch schedule and populate the menu
+    self:updateMenu()
+
+    -- Refresh the menu every interval (default 1 hour)
+    self.timer = hs.timer.new(self.interval, function() self:updateMenu() end)
+    self.timer:start()
+
+    return self
+end
+
+function obj:stop()
+    obj.logger.i("Stopping FotMobSchedule")
+    if self.timer then
+        self.timer:stop()
+    end
+    if self.menuBar then
+        self.menuBar:delete()
+        self.menuBar = nil
+    end
+    return self
 end
 
 function obj:setNumGames()
@@ -161,40 +199,6 @@ function obj:getTeamIdByName(teamName)
         ["Manchester United Women"] = 1122357
     }
     return teamIds[teamName]
-end
-
-function obj:start()
-    obj.logger.i("Starting FotMobSchedule")
-    
-    if not self.menuBar then
-        self.menuBar = hs.menubar.new()
-        self.menuBar:setTitle("F")
-        self.menuBar:setMenu({
-            {title = "Show Schedule", fn = function() showSchedule() end},
-            {title = "Set Teams", fn = function() self:setTeams() end},
-            {title = "Set Number of Games", fn = function() self:setNumGames() end},
-        })
-    end
-    
-    self.timer = hs.timer.new(self.interval, function() self:fetchSchedule() end)
-    self.timer:start()
-    
-    -- Initial fetch
-    self:fetchSchedule()
-    
-    return self
-end
-
-function obj:stop()
-    obj.logger.i("Stopping FotMobSchedule")
-    if self.timer then
-        self.timer:stop()
-    end
-    if self.menuBar then
-        self.menuBar:delete()
-        self.menuBar = nil
-    end
-    return self
 end
 
 function obj:setNextGamesCount(count)
