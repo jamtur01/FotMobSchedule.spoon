@@ -19,7 +19,7 @@ obj.lastSchedule = nil
 obj.teams = hs.settings.get("FotMobSchedule_teams") or {
     { name = "Arsenal Women", id = 258657 }
 }
-obj.showNextGames = hs.settings.get("FotMobSchedule_showNextGames") or 1  -- Default to showing only the next game
+obj.showNextGames = hs.settings.get("FotMobSchedule_showNextGames") or 5
 
 local function fetchData(url)
     obj.logger.d("Fetching data from URL: " .. url)
