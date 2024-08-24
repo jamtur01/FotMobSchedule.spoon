@@ -124,7 +124,17 @@ function obj:start()
     
     if not self.menuBar then
         self.menuBar = hs.menubar.new()
-        self.menuBar:setTitle("F")
+
+        -- Load the icon from the spoon's resource path
+        local iconPath = hs.spoons.resourcePath("fotmob-icon.png")
+        local iconImage = hs.image.imageFromPath(iconPath)
+
+        -- Set the icon if available, otherwise fall back to the title "F"
+        if iconImage then
+            self.menuBar:setIcon(iconImage)
+        else
+            self.menuBar:setTitle("F")
+        end
     end
     
     -- Fetch schedule and populate the menu
