@@ -1,0 +1,100 @@
+name: Build, Tag, and Release Hammerspoon Spoon
+
+permissions:
+  contents: write
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    outputs:
+      spoon_name: ${{ steps.spoon_name.outputs.spoon_name }}
+      tag_name: ${{ steps.tag_name.outputs.tag_name }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Get Spoon Name
+        id: spoon_name
+        run: |
+          spoon_name=$(grep -Eo 'obj.name\s*=\s*"[^"]+"' init.lua | cut -d'"' -f2)
+          if [ -z "$spoon_name" ]; then
+            echo "Spoon name not found, failing the job."
+            exit 1
+          fi
+          echo "spoon_name=${spoon_name}" >> $GITHUB_OUTPUT
+
+      - name: Build the Spoon
+        run: |
+          mkdir -p dist
+          zip -r dist/${{ steps.spoon_name.outputs.spoon_name }}.spoon.zip . -x ".git*" ".github*" "dist/*"
+
+      - name: List Files in dist/ for Debugging
+        run: ls -l dist/
+
+      - name: Upload the Spoon Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.spoon_name.outputs.spoon_name }}.spoon.zip
+          path: dist/${{ steps.spoon_name.outputs.spoon_name }}.spoon.zip
+
+      - name: Get the Git SHA
+        id: git-sha
+        run: |
+          sha=$(git rev-parse --short HEAD)
+          echo "sha=${sha}" >> $GITHUB_OUTPUT
+
+      - name: Extract obj.version from spoon
+        id: version
+        run: |
+          version=$(grep -Eo 'obj.version\s*=\s*"[^"]+"' init.lua | cut -d'"' -f2 || echo "")
+          echo "version=${version}" >> $GITHUB_OUTPUT
+
+      - name: Determine Tag Name
+        id: tag_name
+        run: |
+          datetime=$(date +"%Y%m%d-%H%M%S")
+          if [ -n "${{ steps.version.outputs.version }}" ]; then
+            tag_name="v${{ steps.version.outputs.version }}-${datetime}"
+          else
+            tag_name="${datetime}"
+          fi
+          echo "tag_name=${tag_name}" >> $GITHUB_OUTPUT
+
+      - name: Create and Push Git Tag
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git tag -a ${{ steps.tag_name.outputs.tag_name }} -m "Release ${{ steps.tag_name.outputs.tag_name }}"
+          git push origin ${{ steps.tag_name.outputs.tag_name }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download Spoon Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build.outputs.spoon_name }}.spoon.zip
+
+      - name: List Files in dist/ for Debugging in Release Job
+        run: ls -l .
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.build.outputs.tag_name }} # Use the tag created in the build step
+          name: ${{ needs.build.outputs.tag_name }} # Release name based on the tag
+          files: ${{ needs.build.outputs.spoon_name }}.spoon.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
