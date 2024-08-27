@@ -3,24 +3,27 @@ obj.__index = obj
 
 -- Metadata
 obj.name = "FotMobSchedule"
-obj.version = "2.5"
+obj.version = "2.6"
 obj.author = "James Turnbull <james@lovedthanlost.net>"
 obj.homepage = "https://github.com/jamtur01/FotMobSchedule.spoon"
 obj.license = "MIT - https://opensource.org/licenses/MIT"
 
+-- Constants
+local DEFAULT_INTERVAL = 3600
+local BASE_URL = "https://www.fotmob.com"
+local API_BASE_URL = "https://www.fotmob.com/api/"
+local DEFAULT_TEAM = { name = "Arsenal Women", id = 258657 }
+local DEFAULT_SHOW_NEXT_GAMES = 5
+
+-- Configuration
 obj.logger = hs.logger.new('FotMobSchedule', 'info')
-obj.interval = 3600
-obj.baseUrl = "https://www.fotmob.com"
-obj.apiBaseUrl = "https://www.fotmob.com/api/"
+obj.interval = DEFAULT_INTERVAL
 obj.menuBar = nil
 obj.lastSchedule = nil
+obj.teams = hs.settings.get("FotMobSchedule_teams") or { DEFAULT_TEAM }
+obj.showNextGames = hs.settings.get("FotMobSchedule_showNextGames") or DEFAULT_SHOW_NEXT_GAMES
 
--- Load saved settings or use defaults
-obj.teams = hs.settings.get("FotMobSchedule_teams") or {
-    { name = "Arsenal Women", id = 258657 }
-}
-obj.showNextGames = hs.settings.get("FotMobSchedule_showNextGames") or 5
-
+-- Helper functions
 local function fetchData(url)
     obj.logger.d("Fetching data from URL: " .. url)
     local status, body, headers = hs.http.get(url)
@@ -47,16 +50,14 @@ end
 local function processSchedule(teamData)
     obj.logger.d("Processing schedule for team: " .. teamData.details.name)
     local schedule = {}
-    if teamData and teamData.fixtures and teamData.fixtures.allFixtures and teamData.fixtures.allFixtures.fixtures then
-        local fixtures = teamData.fixtures.allFixtures.fixtures
+    local fixtures = teamData.fixtures and teamData.fixtures.allFixtures and teamData.fixtures.allFixtures.fixtures
+    if fixtures then
         for _, fixture in ipairs(fixtures) do
-            local opponent = fixture.opponent.name
-            local matchDisplay = string.format("%s vs %s", teamData.details.name, opponent)
             table.insert(schedule, {
                 date = formatDate(fixture.status.utcTime),
-                match = matchDisplay,
+                match = string.format("%s vs %s", teamData.details.name, fixture.opponent.name),
                 home = fixture.home.id == teamData.details.id,
-                url = obj.baseUrl .. fixture.pageUrl
+                url = BASE_URL .. fixture.pageUrl
             })
         end
     else
@@ -66,13 +67,13 @@ local function processSchedule(teamData)
     return schedule
 end
 
+-- Main functions
 function obj:fetchSchedule()
     obj.logger.d("Starting to fetch schedules")
     local allSchedules = {}
     for _, team in ipairs(self.teams) do
         obj.logger.d("Fetching schedule for team: " .. team.name)
-        local url = self.apiBaseUrl .. "teams?id=" .. team.id
-        local data = fetchData(url)
+        local data = fetchData(API_BASE_URL .. "teams?id=" .. team.id)
         if data then
             allSchedules[team.name] = processSchedule(data)
         else
@@ -86,72 +87,50 @@ end
 
 function obj:updateMenu()
     local schedules = self.lastSchedule or self:fetchSchedule()
-
     if not schedules then
         hs.notify.new({title="FotMob Schedule Error", informativeText="Failed to fetch FotMob schedule"}):send()
         return
     end
 
     local menuItems = {}
-
     for team, schedule in pairs(schedules) do
         for i, match in ipairs(schedule) do
-            if i > obj.showNextGames then
-                break  -- Stop after showing the configured number of games
-            end
-
-            -- Combine team names and formatted date and time in the title
-            local matchDisplay = string.format("%s - %s", match.match, match.date)
+            if i > self.showNextGames then break end
             table.insert(menuItems, {
-                title = matchDisplay,
+                title = string.format("%s - %s", match.match, match.date),
                 fn = function() hs.urlevent.openURL(match.url) end,
-                tooltip = match.date  -- Tooltip shows the date again (optional)
+                tooltip = match.date
             })
         end
     end
 
-    -- Default item if no upcoming matches
     if #menuItems == 0 then
         table.insert(menuItems, {title = "No upcoming games found"})
     end
 
-    -- Update the menu
     self.menuBar:setMenu(menuItems)
 end
 
 function obj:start()
     obj.logger.i("Starting FotMobSchedule")
-    
     if not self.menuBar then
         self.menuBar = hs.menubar.new()
-
-        -- Load the icon from the spoon's resource path
         local iconPath = hs.spoons.resourcePath("fotmob-icon.png")
         local iconImage = hs.image.imageFromPath(iconPath)
-
-        -- Set the icon if available, otherwise fall back to the title "F"
-        if iconImage then
-            self.menuBar:setIcon(iconImage)
-        else
+        if not self.menuBar:setIcon(iconImage) then
             self.menuBar:setTitle("F")
         end
     end
     
-    -- Fetch schedule and populate the menu
     self:updateMenu()
-
-    -- Refresh the menu every interval (default 1 hour)
     self.timer = hs.timer.new(self.interval, function() self:updateMenu() end)
     self.timer:start()
-
     return self
 end
 
 function obj:stop()
     obj.logger.i("Stopping FotMobSchedule")
-    if self.timer then
-        self.timer:stop()
-    end
+    if self.timer then self.timer:stop() end
     if self.menuBar then
         self.menuBar:delete()
         self.menuBar = nil
@@ -166,9 +145,7 @@ function obj:setNumGames()
             hs.notify.new({title="FotMob Schedule", informativeText="Number of games to show set to " .. self.showNextGames}):send()
         end
     end)
-    :choices({
-        {text = "1"}, {text = "2"}, {text = "3"}, {text = "4"}, {text = "5"}
-    })
+    :choices({{text = "1"}, {text = "2"}, {text = "3"}, {text = "4"}, {text = "5"}})
     :placeholderText("Select number of games to show")
     :show()
 end
@@ -178,7 +155,7 @@ function obj:setTeams()
         if choice then
             local teams = {}
             for team in string.gmatch(choice.text, '([^,]+)') do
-                local trimmedTeam = team:match("^%s*(.-)%s*$")  -- Trim whitespace
+                local trimmedTeam = team:match("^%s*(.-)%s*$")
                 local teamId = self:getTeamIdByName(trimmedTeam)
                 if teamId then
                     table.insert(teams, { name = trimmedTeam, id = teamId })
@@ -186,7 +163,7 @@ function obj:setTeams()
             end
             if #teams > 0 then
                 self.teams = teams
-                hs.settings.set("FotMobSchedule_teams", teams)  -- Save the selected teams
+                hs.settings.set("FotMobSchedule_teams", teams)
                 hs.notify.new({title="FotMob Schedule", informativeText="Teams set to: " .. table.concat(choice.text, ", ")}):send()
             else
                 hs.notify.new({title="FotMob Schedule", informativeText="No valid teams found. Please try again."}):send()
@@ -195,7 +172,6 @@ function obj:setTeams()
     end)
     :choices({
         {text = "Arsenal Women"}, {text = "Chelsea Women"}, {text = "Manchester City Women"}, {text = "Manchester United Women"}
-        -- Add more teams here as needed
     })
     :placeholderText("Enter teams (comma separated)")
     :show()
@@ -214,7 +190,7 @@ end
 function obj:setNextGamesCount(count)
     if type(count) == "number" and count > 0 then
         self.showNextGames = count
-        hs.settings.set("FotMobSchedule_showNextGames", count)  -- Save the number of games to show
+        hs.settings.set("FotMobSchedule_showNextGames", count)
         obj.logger.d("Set to show next " .. count .. " games")
     else
         obj.logger.e("Invalid game count. Please provide a positive number.")
