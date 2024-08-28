@@ -23,10 +23,16 @@ jobs:
           tag_name=$(git describe --tags --abbrev=0)
           echo "tag=$tag_name" >> $GITHUB_OUTPUT
 
+      - name: Extract Spoon Name from init.lua
+        id: spoon_name
+        run: |
+          spoon_name=$(grep -Eo 'obj.name\s*=\s*"[^"]+"' init.lua | cut -d'"' -f2)
+          echo "spoon_name=$spoon_name" >> $GITHUB_OUTPUT
+
       - name: Build the Spoon Zip
         run: |
           mkdir -p dist
-          zip -r dist/*.spoon.zip . -x ".git*" ".github*" "dist/*"
+          zip -r "dist/${{ steps.spoon_name.outputs.spoon_name }}.spoon.zip" . -x ".git*" ".github*" "dist/*" "Makefile"
         shell: bash
 
       - name: Upload Spoon Artifact
