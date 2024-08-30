@@ -112,7 +112,7 @@ function obj:updateMenu()
 end
 
 function obj:start()
-    obj.logger.i("Starting FotMobSchedule")
+    obj.logger.d("Starting FotMobSchedule")
     if not self.menuBar then
         self.menuBar = hs.menubar.new()
         local iconPath = hs.spoons.resourcePath("fotmob-icon.png")
