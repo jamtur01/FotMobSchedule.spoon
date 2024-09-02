@@ -24,14 +24,16 @@ obj.teams = hs.settings.get("FotMobSchedule_teams") or { DEFAULT_TEAM }
 obj.showNextGames = hs.settings.get("FotMobSchedule_showNextGames") or DEFAULT_SHOW_NEXT_GAMES
 
 -- Helper functions
-local function fetchData(url)
+local function fetchData(url, callback)
     obj.logger.d("Fetching data from URL: " .. url)
-    local status, body, headers = hs.http.get(url)
-    if status ~= 200 then
-        obj.logger.ef("Failed to fetch data from %s. Status: %d", url, status)
-        return nil
-    end
-    return hs.json.decode(body)
+    hs.http.asyncGet(url, nil, function(status, body, headers)
+        if status ~= 200 then
+            obj.logger.ef("Failed to fetch data from %s. Status: %d", url, status)
+            callback(nil)
+        else
+            callback(hs.json.decode(body))
+        end
+    end)
 end
 
 local function formatDate(utcTime)
@@ -68,47 +70,54 @@ local function processSchedule(teamData)
 end
 
 -- Main functions
-function obj:fetchSchedule()
+function obj:fetchSchedule(callback)
     obj.logger.d("Starting to fetch schedules")
     local allSchedules = {}
+    local remainingTeams = #self.teams
+
     for _, team in ipairs(self.teams) do
         obj.logger.d("Fetching schedule for team: " .. team.name)
-        local data = fetchData(API_BASE_URL .. "teams?id=" .. team.id)
-        if data then
-            allSchedules[team.name] = processSchedule(data)
-        else
-            obj.logger.e("Failed to fetch data for team: " .. team.name)
-        end
+        fetchData(API_BASE_URL .. "teams?id=" .. team.id, function(data)
+            if data then
+                allSchedules[team.name] = processSchedule(data)
+            else
+                obj.logger.e("Failed to fetch data for team: " .. team.name)
+            end
+            remainingTeams = remainingTeams - 1
+            if remainingTeams == 0 then
+                obj.logger.d("Finished fetching schedules")
+                self.lastSchedule = allSchedules
+                callback(allSchedules)
+            end
+        end)
     end
-    obj.logger.d("Finished fetching schedules")
-    self.lastSchedule = allSchedules
-    return allSchedules
 end
 
 function obj:updateMenu()
-    local schedules = self.lastSchedule or self:fetchSchedule()
-    if not schedules then
-        hs.notify.new({title="FotMob Schedule Error", informativeText="Failed to fetch FotMob schedule"}):send()
-        return
-    end
-
-    local menuItems = {}
-    for team, schedule in pairs(schedules) do
-        for i, match in ipairs(schedule) do
-            if i > self.showNextGames then break end
-            table.insert(menuItems, {
-                title = string.format("%s - %s", match.match, match.date),
-                fn = function() hs.urlevent.openURL(match.url) end,
-                tooltip = match.date
-            })
+    self:fetchSchedule(function(schedules)
+        if not schedules then
+            hs.notify.new({title="FotMob Schedule Error", informativeText="Failed to fetch FotMob schedule"}):send()
+            return
         end
-    end
 
-    if #menuItems == 0 then
-        table.insert(menuItems, {title = "No upcoming games found"})
-    end
+        local menuItems = {}
+        for team, schedule in pairs(schedules) do
+            for i, match in ipairs(schedule) do
+                if i > self.showNextGames then break end
+                table.insert(menuItems, {
+                    title = string.format("%s - %s", match.match, match.date),
+                    fn = function() hs.urlevent.openURL(match.url) end,
+                    tooltip = match.date
+                })
+            end
+        end
 
-    self.menuBar:setMenu(menuItems)
+        if #menuItems == 0 then
+            table.insert(menuItems, {title = "No upcoming games found"})
+        end
+
+        self.menuBar:setMenu(menuItems)
+    end)
 end
 
 function obj:start()
