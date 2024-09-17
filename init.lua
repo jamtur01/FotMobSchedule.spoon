@@ -14,6 +14,7 @@ local BASE_URL = "https://www.fotmob.com"
 local API_BASE_URL = "https://www.fotmob.com/api/"
 local DEFAULT_TEAM = { name = "Arsenal Women", id = 258657 }
 local DEFAULT_SHOW_NEXT_GAMES = 5
+local DEFAULT_SHOW_LAST_GAMES = 5
 
 -- Configuration
 obj.logger = hs.logger.new('FotMobSchedule', 'info')
@@ -22,6 +23,7 @@ obj.menuBar = nil
 obj.lastSchedule = nil
 obj.teams = hs.settings.get("FotMobSchedule_teams") or { DEFAULT_TEAM }
 obj.showNextGames = hs.settings.get("FotMobSchedule_showNextGames") or DEFAULT_SHOW_NEXT_GAMES
+obj.showLastGames = hs.settings.get("FotMobSchedule_showLastGames") or DEFAULT_SHOW_LAST_GAMES
 
 -- Helper functions
 local function fetchData(url, callback)
@@ -55,11 +57,22 @@ local function processSchedule(teamData)
     local fixtures = teamData.fixtures and teamData.fixtures.allFixtures and teamData.fixtures.allFixtures.fixtures
     if fixtures then
         for _, fixture in ipairs(fixtures) do
+            local dateStr = fixture.status.utcTime
+            local timestamp = nil
+            if dateStr and type(dateStr) == "string" then
+                local year, month, day, hour, min = dateStr:match("(%d+)-(%d+)-(%d+)T(%d+):(%d+)")
+                if year then
+                    timestamp = os.time({year=year, month=month, day=day, hour=hour, min=min})
+                end
+            end
             table.insert(schedule, {
                 date = formatDate(fixture.status.utcTime),
                 match = string.format("%s vs %s", teamData.details.name, fixture.opponent.name),
                 home = fixture.home.id == teamData.details.id,
-                url = BASE_URL .. fixture.pageUrl
+                url = BASE_URL .. fixture.pageUrl,
+                finished = fixture.status.finished,
+                result = fixture.status.scoreStr,
+                timestamp = timestamp
             })
         end
     else
@@ -101,11 +114,56 @@ function obj:updateMenu()
         end
 
         local menuItems = {}
+        local matches = {}
+
+        -- Collect all matches into a single list
         for team, schedule in pairs(schedules) do
-            for i, match in ipairs(schedule) do
-                if i > self.showNextGames then break end
+            for _, match in ipairs(schedule) do
+                table.insert(matches, match)
+            end
+        end
+
+        -- Sort matches by timestamp
+        table.sort(matches, function(a, b)
+            return a.timestamp < b.timestamp
+        end)
+
+        -- Separate past and future matches
+        local pastMatches = {}
+        local futureMatches = {}
+        local now = os.time()
+        for _, match in ipairs(matches) do
+            if match.timestamp and match.timestamp < now and match.finished then
+                table.insert(pastMatches, match)
+            elseif match.timestamp and match.timestamp >= now then
+                table.insert(futureMatches, match)
+            end
+        end
+
+        -- Add last N past matches
+        local numPastMatches = self.showLastGames or self.showNextGames
+        if numPastMatches > 0 and #pastMatches > 0 then
+            table.insert(menuItems, { title = "Previous Games", disabled = true })
+            for i = math.max(#pastMatches - numPastMatches + 1,1), #pastMatches do
+                local match = pastMatches[i]
+                local title = string.format("%s - %s", match.match, match.result or "N/A")
                 table.insert(menuItems, {
-                    title = string.format("%s - %s", match.match, match.date),
+                    title = title,
+                    fn = function() hs.urlevent.openURL(match.url) end,
+                    tooltip = match.date
+                })
+            end
+            table.insert(menuItems, { title = "-" })
+        end
+
+        local numFutureMatches = self.showNextGames
+        if numFutureMatches > 0 and #futureMatches > 0 then
+            table.insert(menuItems, { title = "Upcoming Games", disabled = true })
+            for i = 1, math.min(numFutureMatches, #futureMatches) do
+                local match = futureMatches[i]
+                local title = string.format("%s - %s", match.match, match.date)
+                table.insert(menuItems, {
+                    title = title,
                     fn = function() hs.urlevent.openURL(match.url) end,
                     tooltip = match.date
                 })
@@ -113,7 +171,7 @@ function obj:updateMenu()
         end
 
         if #menuItems == 0 then
-            table.insert(menuItems, {title = "No upcoming games found"})
+            table.insert(menuItems, {title = "No games found"})
         end
 
         self.menuBar:setMenu(menuItems)
@@ -129,6 +187,7 @@ function obj:start()
         if not self.menuBar:setIcon(iconImage) then
             self.menuBar:setTitle("F")
         end
+        self.menuBar:setTooltip("FotMob Schedule")
     end
     
     self:updateMenu()
@@ -145,18 +204,6 @@ function obj:stop()
         self.menuBar = nil
     end
     return self
-end
-
-function obj:setNumGames()
-    hs.chooser.new(function(choice)
-        if choice then
-            self:setNextGamesCount(tonumber(choice.text))
-            hs.notify.new({title="FotMob Schedule", informativeText="Number of games to show set to " .. self.showNextGames}):send()
-        end
-    end)
-    :choices({{text = "1"}, {text = "2"}, {text = "3"}, {text = "4"}, {text = "5"}})
-    :placeholderText("Select number of games to show")
-    :show()
 end
 
 function obj:setTeams()
@@ -196,13 +243,46 @@ function obj:getTeamIdByName(teamName)
     return teamIds[teamName]
 end
 
+function obj:setNumGames()
+    hs.chooser.new(function(choice)
+        if choice then
+            local nums = {}
+            for num in string.gmatch(choice.text, '([^,]+)') do
+                table.insert(nums, tonumber(num))
+            end
+            if #nums >= 1 then
+                self:setNextGamesCount(nums[1])
+            end
+            if #nums >= 2 then
+                self:setLastGamesCount(nums[2])
+            end
+            hs.notify.new({title="FotMob Schedule", informativeText="Number of games to show set to Next: " .. self.showNextGames .. ", Previous: " .. self.showLastGames}):send()
+        end
+    end)
+    :choices({
+        {text = "5,5"}, {text = "3,3"}, {text = "5,0"}, {text = "0,5"}
+    })
+    :placeholderText("Enter number of next,previous games (e.g., 5,5)")
+    :show()
+end
+
 function obj:setNextGamesCount(count)
-    if type(count) == "number" and count > 0 then
+    if type(count) == "number" and count >= 0 then
         self.showNextGames = count
         hs.settings.set("FotMobSchedule_showNextGames", count)
         obj.logger.d("Set to show next " .. count .. " games")
     else
-        obj.logger.e("Invalid game count. Please provide a positive number.")
+        obj.logger.e("Invalid next game count. Please provide a non-negative number.")
+    end
+end
+
+function obj:setLastGamesCount(count)
+    if type(count) == "number" and count >= 0 then
+        self.showLastGames = count
+        hs.settings.set("FotMobSchedule_showLastGames", count)
+        obj.logger.d("Set to show last " .. count .. " games")
+    else
+        obj.logger.e("Invalid last game count. Please provide a non-negative number.")
     end
 end
 
