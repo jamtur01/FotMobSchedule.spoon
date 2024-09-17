@@ -3,7 +3,7 @@ obj.__index = obj
 
 -- Metadata
 obj.name = "FotMobSchedule"
-obj.version = "2.7"
+obj.version = "2.8"
 obj.author = "James Turnbull <james@lovedthanlost.net>"
 obj.homepage = "https://github.com/jamtur01/FotMobSchedule.spoon"
 obj.license = "MIT - https://opensource.org/licenses/MIT"
