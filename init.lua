@@ -146,7 +146,7 @@ function obj:updateMenu()
             table.insert(menuItems, { title = "Previous Games", disabled = true })
             for i = math.max(#pastMatches - numPastMatches + 1,1), #pastMatches do
                 local match = pastMatches[i]
-                local title = string.format("%s - %s", match.match, match.result or "N/A")
+                local title = string.format("%s (%s)", match.match, match.result or "N/A")
                 table.insert(menuItems, {
                     title = title,
                     fn = function() hs.urlevent.openURL(match.url) end,
