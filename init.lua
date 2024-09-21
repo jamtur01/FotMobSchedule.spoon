@@ -65,15 +65,52 @@ local function processSchedule(teamData)
                     timestamp = os.time({year=year, month=month, day=day, hour=hour, min=min})
                 end
             end
-            table.insert(schedule, {
-                date = formatDate(fixture.status.utcTime),
-                match = string.format("%s vs %s", teamData.details.name, fixture.opponent.name),
-                home = fixture.home.id == teamData.details.id,
-                url = BASE_URL .. fixture.pageUrl,
-                finished = fixture.status.finished,
-                result = fixture.status.scoreStr,
-                timestamp = timestamp
-            })
+
+            if fixture.status.finished and fixture.status.scoreStr then
+                local homeScore, awayScore = fixture.status.scoreStr:match("(%d+)%s*-%s*(%d+)")
+                homeScore = tonumber(homeScore)
+                awayScore = tonumber(awayScore)
+                
+                local homeTeam = teamData.details.name
+                local awayTeam = fixture.opponent.name
+                local matchTitle = ""
+
+                if fixture.home.id == teamData.details.id then
+                    if homeScore > awayScore then
+                        matchTitle = string.format("🏆 %s vs %s", homeTeam, awayTeam)
+                    else
+                        matchTitle = string.format("%s vs 🏆 %s", homeTeam, awayTeam)
+                    end
+                else
+                    if awayScore > homeScore then
+                        matchTitle = string.format("%s vs 🏆 %s", homeTeam, awayTeam)
+                    else
+                        matchTitle = string.format("🏆 %s vs %s", awayTeam, homeTeam)
+                    end
+                end
+
+                local scoreDisplay = string.format("%d - %d", homeScore, awayScore)
+                table.insert(schedule, {
+                    date = formatDate(fixture.status.utcTime),
+                    match = matchTitle,
+                    home = fixture.home.id == teamData.details.id,
+                    url = BASE_URL .. fixture.pageUrl,
+                    finished = fixture.status.finished,
+                    result = scoreDisplay,
+                    timestamp = timestamp
+                })
+            else
+                local matchTitle = string.format("%s vs %s", teamData.details.name, fixture.opponent.name)
+                table.insert(schedule, {
+                    date = formatDate(fixture.status.utcTime),
+                    match = matchTitle,
+                    home = fixture.home.id == teamData.details.id,
+                    url = BASE_URL .. fixture.pageUrl,
+                    finished = fixture.status.finished,
+                    result = "Upcoming",
+                    timestamp = timestamp
+                })
+            end
         end
     else
         obj.logger.w("No fixtures found or unexpected data structure")
