@@ -119,7 +119,6 @@ local function processSchedule(teamData)
     return schedule
 end
 
--- Main functions
 function obj:fetchSchedule(callback)
     obj.logger.d("Starting to fetch schedules")
     local allSchedules = {}
