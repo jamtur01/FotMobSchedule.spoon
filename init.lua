@@ -38,13 +38,20 @@ local function fetchData(url, callback)
     end)
 end
 
+local function getTimestampFromUTCDateTable(dateTable)
+    local timestampUTC = os.time(dateTable)
+    local timeDiff = os.difftime(os.time(), os.time(os.date("!*t")))
+    return timestampUTC + timeDiff
+end
+
 local function formatDate(utcTime)
     local timestamp = nil
     if type(utcTime) == "string" then
         local pattern = "(%d+)-(%d+)-(%d+)T(%d+):(%d+)"
         local year, month, day, hour, min = utcTime:match(pattern)
         if year then
-            timestamp = os.time({year=year, month=month, day=day, hour=hour, min=min})
+            local dateTable = {year=year, month=month, day=day, hour=hour, min=min, sec=0}
+            timestamp = getTimestampFromUTCDateTable(dateTable)
         end
     elseif type(utcTime) == "number" then
         timestamp = utcTime / 1000
@@ -77,6 +84,7 @@ local function getMatchStatus(fixture)
     end
 end
 
+-- Main functions
 local function processSchedule(teamData)
     obj.logger.d("Processing schedule for team: " .. teamData.details.name)
     local schedule = {}
@@ -89,6 +97,30 @@ local function processSchedule(teamData)
             local tournamentName = fixture.tournament and fixture.tournament.name or "Unknown Tournament"
             local matchUrl = BASE_URL .. fixture.pageUrl
             local result = fixture.status.scoreStr or "Upcoming"
+            
+            local homeScore = fixture.home.score
+            local awayScore = fixture.away.score
+            
+            obj.logger.d("Fixture status: " .. hs.inspect(fixture.status))
+            obj.logger.d(string.format("Home Score: %s, Away Score: %s", tostring(homeScore), tostring(awayScore)))
+
+            local winner = nil
+            if status == "finished" then
+                obj.logger.d(string.format("Match finished between %s and %s", fixture.home.name, fixture.away.name))
+                if homeScore ~= nil and awayScore ~= nil then
+                    if homeScore > awayScore then
+                        winner = fixture.home.id
+                    elseif awayScore > homeScore then
+                        winner = fixture.away.id
+                    else
+                        winner = "draw"
+                    end
+                else
+                    obj.logger.w("Scores are nil; cannot determine winner")
+                end
+            else
+                obj.logger.d("Match status is not 'finished'; skipping winner determination")
+            end
 
             local matchData = {
                 date = matchDateStr,
@@ -100,6 +132,7 @@ local function processSchedule(teamData)
                 url = matchUrl,
                 result = result,
                 tournament = tournamentName,
+                winner = winner,
             }
 
             table.insert(schedule, matchData)
@@ -144,14 +177,12 @@ function obj:updateMenu()
         local menuItems = {}
         local matches = {}
 
-        -- Collect all matches into a single list
         for team, schedule in pairs(schedules) do
             for _, match in ipairs(schedule) do
                 table.insert(matches, match)
             end
         end
 
-        -- Group matches by tournament
         local matchesByTournament = {}
         for _, match in ipairs(matches) do
             local tournament = match.tournament
@@ -161,14 +192,12 @@ function obj:updateMenu()
             table.insert(matchesByTournament[tournament], match)
         end
 
-        -- Sort tournaments alphabetically
         local sortedTournaments = {}
         for tournament in pairs(matchesByTournament) do
             table.insert(sortedTournaments, tournament)
         end
         table.sort(sortedTournaments)
 
-        -- Build menu items
         for _, tournament in ipairs(sortedTournaments) do
             local tournamentMatches = matchesByTournament[tournament]
             table.sort(tournamentMatches, function(a, b)
@@ -191,15 +220,32 @@ function obj:updateMenu()
 
                 local title = match.match
                 if match.status == "finished" then
-                    title = string.format("%s (%s)", title, match.result)
+                    local trophy = "🏆 "
+                    local drawEmoji = "🤝 "
+                    local matchTitleWithEmoji = title
+                    if match.winner then
+                        if match.winner == "draw" then
+                            matchTitleWithEmoji = string.format("%s%s vs %s", drawEmoji, match.home.name, match.away.name)
+                        elseif match.winner == match.home.id then
+                            matchTitleWithEmoji = string.format("%s%s vs %s", trophy, match.home.name, match.away.name)
+                        elseif match.winner == match.away.id then
+                            matchTitleWithEmoji = string.format("%s vs %s%s", match.home.name, match.away.name, trophy)
+                        end
+                    end
+                    title = string.format("%s (%s)", matchTitleWithEmoji, match.result)
                 elseif match.status == "in-progress" then
                     title = string.format("%s (Live)", title)
                 else
                     title = string.format("%s - %s", title, match.date)
                 end
 
+                local styledTitle = hs.styledtext.new(title, {
+                    font = { name = "Helvetica", size = 14 },
+                    paragraphStyle = { alignment = "left" }
+                })
+
                 table.insert(menuItems, {
-                    title = title,
+                    title = styledTitle,
                     image = icon,
                     fn = function() hs.urlevent.openURL(match.url) end,
                     tooltip = match.date
@@ -215,6 +261,7 @@ function obj:updateMenu()
         self.menuBar:setMenu(menuItems)
     end)
 end
+
 
 function obj:start()
     obj.logger.d("Starting FotMobSchedule")
