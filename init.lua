@@ -15,6 +15,7 @@ local API_BASE_URL = "https://www.fotmob.com/api/"
 local DEFAULT_TEAM = { name = "Arsenal Women", id = 258657 }
 local DEFAULT_SHOW_NEXT_GAMES = 5
 local DEFAULT_SHOW_LAST_GAMES = 5
+local X_FM_REQ_HEADER_VALUE = "eyJib2R5Ijp7InVybCI6Ii9hcGkvbWF0Y2hlcz9kYXRlPTIwMjQxMTA2JnRpbWV6b25lPUF1c3RyYWxpYSUyRk1lbGJvdXJuZSZjY29kZTM9QVVTIiwiY29kZSI6MTczMDgyNDU4NDUwMywiZm9vIjoiNThlOWE0MDg1In0sInNpZ25hdHVyZSI6IkRBOTk0NTJBQ0RDNTlFOTRGQzFBQjE4NDdBNTU3RUY1In0="
 
 -- Configuration
 obj.logger = hs.logger.new('FotMobSchedule', 'info')
@@ -28,7 +29,10 @@ obj.showLastGames = hs.settings.get("FotMobSchedule_showLastGames") or DEFAULT_S
 -- Helper functions
 local function fetchData(url, callback)
     obj.logger.d("Fetching data from URL: " .. url)
-    hs.http.asyncGet(url, nil, function(status, body, headers)
+    local headers = {
+        ["x-fm-req"] = X_FM_REQ_HEADER_VALUE
+    }
+    hs.http.asyncGet(url, headers, function(status, body, responseHeaders)
         if status ~= 200 then
             obj.logger.ef("Failed to fetch data from %s. Status: %d", url, status)
             callback(nil)
