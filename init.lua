@@ -15,7 +15,7 @@ local API_BASE_URL = "https://www.fotmob.com/api/"
 local DEFAULT_TEAM = { name = "Arsenal Women", id = 258657 }
 local DEFAULT_SHOW_NEXT_GAMES = 5
 local DEFAULT_SHOW_LAST_GAMES = 5
-local X_FM_REQ_HEADER_VALUE = "eyJib2R5Ijp7InVybCI6Ii9hcGkvbWF0Y2hlcz9kYXRlPTIwMjQxMTA2JnRpbWV6b25lPUF1c3RyYWxpYSUyRk1lbGJvdXJuZSZjY29kZTM9QVVTIiwiY29kZSI6MTczMDgyNDU4NDUwMywiZm9vIjoiNThlOWE0MDg1In0sInNpZ25hdHVyZSI6IkRBOTk0NTJBQ0RDNTlFOTRGQzFBQjE4NDdBNTU3RUY1In0="
+local HEADER_SERVER_URL = "http://46.101.91.154:6006/"
 
 -- Configuration
 obj.logger = hs.logger.new('FotMobSchedule', 'info')
@@ -25,14 +25,37 @@ obj.lastSchedule = nil
 obj.teams = hs.settings.get("FotMobSchedule_teams") or { DEFAULT_TEAM }
 obj.showNextGames = hs.settings.get("FotMobSchedule_showNextGames") or DEFAULT_SHOW_NEXT_GAMES
 obj.showLastGames = hs.settings.get("FotMobSchedule_showLastGames") or DEFAULT_SHOW_LAST_GAMES
+obj.headers = nil -- Placeholder for dynamic headers
 
 -- Helper functions
+local function fetchHeaders(callback)
+    obj.logger.d("Fetching dynamic headers from server: " .. HEADER_SERVER_URL)
+    hs.http.asyncGet(HEADER_SERVER_URL, nil, function(status, body, responseHeaders)
+        if status ~= 200 then
+            obj.logger.ef("Failed to fetch headers. Status: %d", status)
+            callback(nil)
+        else
+            local headers = hs.json.decode(body)
+            if headers then
+                obj.logger.d("Successfully fetched headers.")
+                callback(headers)
+            else
+                obj.logger.ef("Failed to decode headers response.")
+                callback(nil)
+            end
+        end
+    end)
+end
+
 local function fetchData(url, callback)
+    if not obj.headers then
+        obj.logger.e("Headers are not initialized. Aborting fetch.")
+        callback(nil)
+        return
+    end
+
     obj.logger.d("Fetching data from URL: " .. url)
-    local headers = {
-        ["x-fm-req"] = X_FM_REQ_HEADER_VALUE
-    }
-    hs.http.asyncGet(url, headers, function(status, body, responseHeaders)
+    hs.http.asyncGet(url, obj.headers, function(status, body, responseHeaders)
         if status ~= 200 then
             obj.logger.ef("Failed to fetch data from %s. Status: %d", url, status)
             callback(nil)
@@ -148,29 +171,6 @@ local function processSchedule(teamData)
     return schedule
 end
 
-function obj:fetchSchedule(callback)
-    obj.logger.d("Starting to fetch schedules")
-    local allSchedules = {}
-    local remainingTeams = #self.teams
-
-    for _, team in ipairs(self.teams) do
-        obj.logger.d("Fetching schedule for team: " .. team.name)
-        fetchData(API_BASE_URL .. "teams?id=" .. team.id, function(data)
-            if data then
-                allSchedules[team.name] = processSchedule(data)
-            else
-                obj.logger.e("Failed to fetch data for team: " .. team.name)
-            end
-            remainingTeams = remainingTeams - 1
-            if remainingTeams == 0 then
-                obj.logger.d("Finished fetching schedules")
-                self.lastSchedule = allSchedules
-                callback(allSchedules)
-            end
-        end)
-    end
-end
-
 function obj:updateMenu()
     self:fetchSchedule(function(schedules)
         if not schedules then
@@ -267,21 +267,60 @@ function obj:updateMenu()
 end
 
 
-function obj:start()
-    obj.logger.d("Starting FotMobSchedule")
-    if not self.menuBar then
-        self.menuBar = hs.menubar.new()
-        local iconPath = hs.spoons.resourcePath("fotmob-icon.png")
-        local iconImage = hs.image.imageFromPath(iconPath)
-        if not self.menuBar:setIcon(iconImage) then
-            self.menuBar:setTitle("F")
-        end
-        self.menuBar:setTooltip("FotMob Schedule")
+function obj:fetchSchedule(callback)
+    if not obj.headers then
+        obj.logger.e("Headers are not initialized. Fetch aborted.")
+        callback(nil)
+        return
     end
 
-    self:updateMenu()
-    self.timer = hs.timer.new(self.interval, function() self:updateMenu() end)
-    self.timer:start()
+    obj.logger.d("Starting to fetch schedules")
+    local allSchedules = {}
+    local remainingTeams = #self.teams
+
+    for _, team in ipairs(self.teams) do
+        obj.logger.d("Fetching schedule for team: " .. team.name)
+        fetchData(API_BASE_URL .. "teams?id=" .. team.id, function(data)
+            if data then
+                allSchedules[team.name] = processSchedule(data)
+            else
+                obj.logger.e("Failed to fetch data for team: " .. team.name)
+            end
+            remainingTeams = remainingTeams - 1
+            if remainingTeams == 0 then
+                obj.logger.d("Finished fetching schedules")
+                self.lastSchedule = allSchedules
+                callback(allSchedules)
+            end
+        end)
+    end
+end
+
+function obj:start()
+    obj.logger.d("Starting FotMobSchedule")
+    fetchHeaders(function(headers)
+        if not headers then
+            hs.notify.new({title="FotMob Schedule Error", informativeText="Failed to fetch headers"}):send()
+            return
+        end
+
+        obj.headers = headers
+        obj.headers["User-Agent"] = "Hammerspoon/FotMobSchedule"
+
+        if not self.menuBar then
+            self.menuBar = hs.menubar.new()
+            local iconPath = hs.spoons.resourcePath("fotmob-icon.png")
+            local iconImage = hs.image.imageFromPath(iconPath)
+            if not self.menuBar:setIcon(iconImage) then
+                self.menuBar:setTitle("F")
+            end
+            self.menuBar:setTooltip("FotMob Schedule")
+        end
+
+        self:updateMenu()
+        self.timer = hs.timer.new(self.interval, function() self:updateMenu() end)
+        self.timer:start()
+    end)
     return self
 end
 
